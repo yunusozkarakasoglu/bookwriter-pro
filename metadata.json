@@ -1,0 +1,8 @@
+{
+  "name": "BookWriter Pro ",
+  "description": "Gelişmiş alıntı, wiki ve proje yönetimi özelliklerine sahip profesyonel kitap yazma ve düzenleme aracı.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
