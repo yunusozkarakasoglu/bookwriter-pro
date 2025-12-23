@@ -1,4 +1,3 @@
-
 export interface WikiEntry {
   id: string;
   projectId: string; // Origin Project ID

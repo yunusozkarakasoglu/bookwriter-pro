@@ -16,6 +16,15 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterScope, setFilterScope] = useState<'all' | 'current'>('current'); 
   
+  // Export Modal State
+  const [exportScope, setExportScope] = useState({
+      all: true,
+      projects: true,
+      wikis: true,
+      citations: true,
+      notes: true
+  });
+
   // Project Modal Tabs
   const [projectModalTab, setProjectModalTab] = useState<'general' | 'content' | 'hierarchy' | 'settings'>('general');
   
@@ -31,18 +40,18 @@ const App: React.FC = () => {
   const [tempHtmlContent, setTempHtmlContent] = useState('');
 
   // File Input Refs
-  const fileInputRef = useRef<HTMLInputElement>(null); // For Single Item/Project Import
-  const fullBackupInputRef = useRef<HTMLInputElement>(null); // For Full System Restore
+  const fileInputRef = useRef<HTMLInputElement>(null); // For Global Import
 
   const [modal, setModal] = useState<{ 
-    type: 'project' | 'wiki' | 'citation' | 'note' | 'wikiPreview' | 'citationPreview' | 'notePreview' | 'database' | 'link-selector' | 'save-draft' | 'settings' | 'import-conflict' | 'delete-confirm' | 'full-restore-confirm', 
+    type: 'project' | 'wiki' | 'citation' | 'note' | 'wikiPreview' | 'citationPreview' | 'notePreview' | 'database' | 'link-selector' | 'save-draft' | 'settings' | 'delete-confirm' | 'export-options' | 'import-analysis' | 'alert' | 'restore-checkpoint-confirm' | 'full-restore-confirm' | 'import-conflict', 
     data?: any,
-    deleteType?: 'project' | 'wiki' | 'citation' | 'note' | 'chapter', // Added chapter
+    deleteType?: 'project' | 'wiki' | 'citation' | 'note' | 'chapter', 
     mode?: 'create' | 'edit',
     dbTab?: 'wiki' | 'citations' | 'notes',
     linkType?: 'wiki' | 'citation',
-    importData?: { project: Project, relatedWikis: WikiEntry[], relatedCitations: Citation[], relatedNotes: NoteEntry[] },
-    restoreData?: AppState // For full backup restore
+    importData?: any, // Can be full state or project object
+    restoreData?: AppState,
+    alertMessage?: string
   } | null>(null);
 
   // Sync temp content when modal data changes
@@ -96,7 +105,7 @@ const App: React.FC = () => {
   };
 
   const [state, setState] = useState<AppState>(() => {
-    const saved = localStorage.getItem('bookwriter_state_v13'); // Bump version
+    const saved = localStorage.getItem('bookwriter_state_v13');
     if (saved) return JSON.parse(saved);
     
     const { project, wikis, citations, notes } = createSampleData();
@@ -123,18 +132,24 @@ const App: React.FC = () => {
 
   const createCheckpoint = useCallback(() => {
     localStorage.setItem('bookwriter_checkpoint', JSON.stringify(state));
-    alert('Veritabanı yedeği başarıyla alındı.');
+    setModal({ type: 'alert', alertMessage: 'Veritabanı yedeği başarıyla alındı.' });
   }, [state]);
 
   const restoreCheckpoint = useCallback(() => {
-    if(!confirm("Mevcut veriler silinecek ve son yedek yüklenecek. Onaylıyor musunuz?")) return;
+    // Check if checkpoint exists first
+    const saved = localStorage.getItem('bookwriter_checkpoint');
+    if (!saved) {
+        setModal({ type: 'alert', alertMessage: "Kayıtlı yedek bulunamadı." });
+        return;
+    }
+    setModal({ type: 'restore-checkpoint-confirm' });
+  }, []);
+
+  const performRestoreCheckpoint = useCallback(() => {
     const saved = localStorage.getItem('bookwriter_checkpoint');
     if (saved) {
       setState(JSON.parse(saved));
-      alert('Yedek geri yüklendi.');
-      setModal(null);
-    } else {
-        alert("Kayıtlı yedek bulunamadı.");
+      setModal({ type: 'alert', alertMessage: 'Yedek geri yüklendi.' });
     }
   }, []);
 
@@ -159,30 +174,65 @@ const App: React.FC = () => {
       ? findChapter(state.currentProject.chapters, state.activeChapterId) 
       : undefined;
 
-  // --- FULL SYSTEM BACKUP & RESTORE ---
+  // --- GLOBAL IMPORT / EXPORT LOGIC ---
 
-  const handleFullBackup = () => {
-      const backupData = {
+  const handleGlobalExport = () => {
+      setModal({ type: 'export-options' });
+  };
+
+  const handleGlobalImport = () => {
+      fileInputRef.current?.click();
+  };
+
+  const performExport = () => {
+      const data: any = {
           version: '2.2.0',
           timestamp: new Date().toISOString(),
-          state: state
+          type: 'custom-export'
       };
 
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      if (exportScope.all) {
+          data.state = state;
+          data.type = 'full-backup';
+      } else {
+          if (exportScope.projects) data.projects = state.projects;
+          if (exportScope.wikis) data.wikis = state.wikis;
+          if (exportScope.citations) data.citations = state.citations;
+          if (exportScope.notes) data.notes = state.notes;
+      }
+
+      const filename = `BookWriter_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
-      downloadAnchorNode.setAttribute("download", `BookWriter_Backup_${dateStr}.json`);
+      downloadAnchorNode.setAttribute("download", filename);
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
+      setModal(null);
   };
 
-  const handleFullRestoreClick = () => {
-      fullBackupInputRef.current?.click();
+  const toggleExportScope = (key: keyof typeof exportScope) => {
+      if (key === 'all') {
+          const newVal = !exportScope.all;
+          setExportScope({
+              all: newVal,
+              projects: newVal,
+              wikis: newVal,
+              citations: newVal,
+              notes: newVal
+          });
+      } else {
+          setExportScope(prev => {
+              const next = { ...prev, [key]: !prev[key] };
+              if (!next[key]) next.all = false;
+              if (next.projects && next.wikis && next.citations && next.notes) next.all = true;
+              return next;
+          });
+      }
   };
 
-  const handleFullRestoreRequest = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
 
@@ -190,28 +240,85 @@ const App: React.FC = () => {
       reader.onload = (e) => {
           try {
               const json = JSON.parse(e.target?.result as string);
-              if (!json.state || !json.state.projects) {
-                  alert('Geçersiz yedek dosyası formatı.');
+              let importType = 'unknown';
+              if (json.type === 'full-backup' || (json.state && json.state.projects)) importType = 'full-backup';
+              else if (json.project && json.project.id) importType = 'project-export';
+              else if (json.type === 'single-item' || (json.data && json.type)) importType = 'single-item';
+              else if (json.type === 'custom-export') importType = 'custom-export'; 
+              
+              if (importType === 'unknown') {
+                  setModal({ type: 'alert', alertMessage: 'Tanınmayan dosya formatı.' });
                   return;
               }
-              
-              setModal({ type: 'full-restore-confirm', restoreData: json.state });
+
+              setModal({ type: 'import-analysis', importData: { ...json, _detectedType: importType } });
 
           } catch (err) {
-              alert('Dosya okunamadı. JSON formatı bozuk olabilir.');
+              setModal({ type: 'alert', alertMessage: 'Dosya okunamadı. JSON formatı bozuk olabilir.' });
           }
-          if (fullBackupInputRef.current) fullBackupInputRef.current.value = '';
+          if (fileInputRef.current) fileInputRef.current.value = '';
       };
       reader.readAsText(file);
   };
 
-  const performFullRestore = () => {
-      if (modal?.type === 'full-restore-confirm' && modal.restoreData) {
-          setState(modal.restoreData);
-          setModal(null);
-          alert('Sistem başarıyla geri yüklendi.');
+  const performImport = () => {
+      if (!modal || modal.type !== 'import-analysis' || !modal.importData) return;
+      const data = modal.importData;
+      const type = data._detectedType;
+
+      if (type === 'full-backup') {
+          setState(data.state);
+          setModal({ type: 'alert', alertMessage: 'Sistem başarıyla geri yüklendi.' });
           setView('dashboard');
+      } else if (type === 'custom-export') {
+          setState(prev => ({
+              ...prev,
+              projects: data.projects ? [...prev.projects, ...data.projects] : prev.projects,
+              wikis: data.wikis ? [...prev.wikis, ...data.wikis] : prev.wikis,
+              citations: data.citations ? [...prev.citations, ...data.citations] : prev.citations,
+              notes: data.notes ? [...prev.notes, ...data.notes] : prev.notes,
+          }));
+          setModal({ type: 'alert', alertMessage: 'Seçili veriler içe aktarıldı.' });
+      } else if (type === 'project-export') {
+          setState(prev => {
+               const filteredProjects = prev.projects.filter(p => p.id !== data.project.id);
+               return {
+                   ...prev,
+                   projects: [...filteredProjects, data.project],
+                   wikis: [...prev.wikis, ...(data.relatedWikis || [])],
+                   citations: [...prev.citations, ...(data.relatedCitations || [])],
+                   notes: [...prev.notes, ...(data.relatedNotes || [])]
+               };
+          });
+          setModal({ type: 'alert', alertMessage: 'Proje başarıyla içe aktarıldı.' });
+      } else if (type === 'single-item') {
+           const item = data.data;
+           const newItem = { ...item, id: `${data.type[0]}-${Date.now()}` }; 
+           if (data.type === 'wiki') setState(prev => ({ ...prev, wikis: [...prev.wikis, newItem] }));
+           else if (data.type === 'citation') setState(prev => ({ ...prev, citations: [...prev.citations, newItem] }));
+           else if (data.type === 'note') setState(prev => ({ ...prev, notes: [...prev.notes, newItem] }));
+           setModal({ type: 'alert', alertMessage: 'Öğe başarıyla eklendi.' });
+      } else {
+          setModal(null);
       }
+  };
+
+  const integrateImportedProject = (data: any) => {
+      setState(prev => {
+          const filteredProjects = prev.projects.filter(p => p.id !== data.project.id);
+          const filteredWikis = prev.wikis.filter(w => w.projectId !== data.project.id);
+          const filteredCitations = prev.citations.filter(c => c.projectId !== data.project.id);
+          const filteredNotes = prev.notes.filter(n => n.projectId !== data.project.id);
+
+          return {
+              ...prev,
+              projects: [...filteredProjects, data.project],
+              wikis: [...filteredWikis, ...(data.relatedWikis || [])],
+              citations: [...filteredCitations, ...(data.relatedCitations || [])],
+              notes: [...filteredNotes, ...(data.relatedNotes || [])],
+          };
+      });
+      setModal({ type: 'alert', alertMessage: 'Proje başarıyla içe aktarıldı.' });
   };
 
   // --- Project Actions ---
@@ -235,8 +342,6 @@ const App: React.FC = () => {
     }));
   };
 
-  // --- Dashboard Project Management Actions ---
-  
   const handleEditProjectProperties = (project: Project) => {
       setModal({ type: 'project', mode: 'edit', data: project });
       setWizardColor(project.pageTheme || '#d8dee3');
@@ -273,12 +378,10 @@ const App: React.FC = () => {
       }));
   };
 
-  // Instead of direct delete, open confirmation modal
   const handleDeleteProjectRequest = (project: Project) => {
       setModal({ type: 'delete-confirm', data: project, deleteType: 'project' });
   };
 
-  // Actual Delete Action
   const performDeleteProject = (project: Project) => {
       setState(prev => ({
           ...prev,
@@ -290,8 +393,6 @@ const App: React.FC = () => {
       }));
       setModal(null);
   };
-
-  // --- IMPORT / EXPORT LOGIC ---
 
   const handleExportProject = (project: Project) => {
       const projectData = {
@@ -310,14 +411,12 @@ const App: React.FC = () => {
       downloadAnchorNode.remove();
   };
 
-  // Generic Export for single items
   const handleExportItem = (type: 'wiki' | 'citation' | 'note', item: any) => {
       const exportData = {
           type: type,
           data: item,
           exportedAt: new Date().toISOString()
       };
-      
       const title = item.title || item.source || 'Item';
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
       const downloadAnchorNode = document.createElement('a');
@@ -331,85 +430,6 @@ const App: React.FC = () => {
   const handleImportClick = () => {
       fileInputRef.current?.click();
   };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          try {
-              const json = JSON.parse(e.target?.result as string);
-              
-              // 1. PROJECT IMPORT
-              if (json.project && json.project.id) {
-                  const existingProject = state.projects.find(p => p.id === json.project.id);
-                  if (existingProject) {
-                      setModal({ 
-                          type: 'import-conflict', 
-                          data: existingProject, 
-                          importData: json 
-                      });
-                  } else {
-                      integrateImportedProject(json);
-                  }
-                  return;
-              }
-
-              // 2. SINGLE ITEM IMPORT (Wiki, Citation, Note)
-              if (json.type && json.data) {
-                  const item = json.data;
-                  // Assign new ID to prevent hard conflicts, or could check existence. 
-                  // For simplicity, we assume we want to import it as a copy or new item.
-                  // But user might want to restore. Let's keep ID but if exists, maybe append (Copy).
-                  // For now: Just add. If ID conflicts, it might be weird. Let's regenerate ID for single item imports to be safe.
-                  const newItem = { ...item, id: `${json.type[0]}-${Date.now()}` }; 
-                  
-                  if (json.type === 'wiki') {
-                      setState(prev => ({ ...prev, wikis: [...prev.wikis, newItem] }));
-                      alert('Wiki başarıyla içeri aktarıldı.');
-                  } else if (json.type === 'citation') {
-                      setState(prev => ({ ...prev, citations: [...prev.citations, newItem] }));
-                      alert('Kaynak başarıyla içeri aktarıldı.');
-                  } else if (json.type === 'note') {
-                      setState(prev => ({ ...prev, notes: [...prev.notes, newItem] }));
-                      alert('Not başarıyla içeri aktarıldı.');
-                  }
-                  return;
-              }
-
-              alert('Geçersiz veya tanınmayan dosya formatı.');
-
-          } catch (err) {
-              alert('Dosya okunamadı. JSON formatı bozuk olabilir.');
-          }
-          // Reset input
-          if (fileInputRef.current) fileInputRef.current.value = '';
-      };
-      reader.readAsText(file);
-  };
-
-  const integrateImportedProject = (data: any) => {
-      setState(prev => {
-          // Clean existing data if ID matches (Overwrite logic)
-          const filteredProjects = prev.projects.filter(p => p.id !== data.project.id);
-          const filteredWikis = prev.wikis.filter(w => w.projectId !== data.project.id);
-          const filteredCitations = prev.citations.filter(c => c.projectId !== data.project.id);
-          const filteredNotes = prev.notes.filter(n => n.projectId !== data.project.id);
-
-          return {
-              ...prev,
-              projects: [...filteredProjects, data.project],
-              wikis: [...filteredWikis, ...(data.relatedWikis || [])],
-              citations: [...filteredCitations, ...(data.relatedCitations || [])],
-              notes: [...filteredNotes, ...(data.relatedNotes || [])],
-          };
-      });
-      alert('Proje başarıyla içe aktarıldı.');
-      setModal(null);
-  };
-
-  // -------------------------
 
   const handleOpenDraft = () => {
       if (state.currentProject) {
@@ -485,7 +505,6 @@ const App: React.FC = () => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     
-    // Check if editing existing project
     if (modal?.mode === 'edit' && modal.data) {
         const updatedProject: Project = {
             ...modal.data,
@@ -510,7 +529,6 @@ const App: React.FC = () => {
         return;
     }
 
-    // Creating new Project
     const defaultPagesRaw = formData.get('defaultPages') as string;
     const defaultPages = defaultPagesRaw 
         ? defaultPagesRaw.split('\n').filter(t => t.trim()).map((t, i) => ({
@@ -552,8 +570,6 @@ const App: React.FC = () => {
     setView('editor');
   };
 
-  // --- Sidebar / Structure Actions ---
-
   const handleRenameChapter = (id: string, newTitle: string) => {
       if (!state.currentProject) return;
       const updateTitle = (chapters: Chapter[]): Chapter[] => {
@@ -590,7 +606,6 @@ const App: React.FC = () => {
     setState(s => ({ ...s, currentProject: updatedProject, activeChapterId: newChapter.id }));
   };
 
-  // Triggers deletion confirmation
   const handleDeleteChapterRequest = (id: string) => {
     if (!state.currentProject) return;
     const chapter = findChapter(state.currentProject.chapters, id);
@@ -599,7 +614,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Executes actual deletion
   const performDeleteChapter = (chapter: Chapter) => {
     if (!state.currentProject) return;
     const id = chapter.id;
@@ -659,8 +673,6 @@ const App: React.FC = () => {
     }));
   };
 
-  // --- GLOBAL Data Management ---
-  
   const handleSaveWiki = (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       const fd = new FormData(e.currentTarget);
@@ -785,8 +797,6 @@ const App: React.FC = () => {
       setModal(null);
   };
 
-  // --- Linking Logic ---
-
   const handleOpenLinkSelector = (type: 'wiki' | 'citation', range: Range, text: string) => {
       setPendingSelectionRange(range);
       setPendingSelectionText(text);
@@ -803,7 +813,7 @@ const App: React.FC = () => {
       span.setAttribute('data-id', item.id);
       span.setAttribute('data-type', type);
       span.setAttribute('contenteditable', 'false');
-      span.innerText = `(*)`; // Temporary placeholder, updated by Editor
+      span.innerText = `(*)`; 
 
       const sel = window.getSelection();
       sel?.removeAllRanges();
@@ -814,7 +824,6 @@ const App: React.FC = () => {
       pendingSelectionRange.insertNode(span);
       span.parentNode?.insertBefore(textNode, span);
 
-      // Force update content immediately
       if (state.activeChapterId) {
           const editor = document.querySelector('.editor-content') as HTMLElement;
           if(editor) {
@@ -828,7 +837,6 @@ const App: React.FC = () => {
       setModal(null);
   };
 
-  // Resize logic
   const startResizing = useCallback(() => {
     isResizing.current = true;
     document.addEventListener('mousemove', handleMouseMove);
@@ -849,7 +857,6 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // --- Filtering Logic ---
   const getFilteredItems = (type: 'wiki' | 'citation' | 'note') => {
       let items: any[] = type === 'wiki' ? state.wikis : type === 'citation' ? state.citations : state.notes;
 
@@ -876,7 +883,6 @@ const App: React.FC = () => {
   const filteredCitations = getFilteredItems('citation');
   const filteredNotes = getFilteredItems('note');
 
-  // --- Modal Header Logic ---
   const getModalHeader = () => {
     if (!modal) return null;
 
@@ -884,11 +890,8 @@ const App: React.FC = () => {
         const itemType = modal.deleteType === 'wiki' ? 'Wiki' : modal.deleteType === 'citation' ? 'Kaynak' : modal.deleteType === 'note' ? 'Not' : modal.deleteType === 'chapter' ? 'Sayfa/Bölüm' : 'Proje';
         return { title: `${itemType} Sil`, subtitle: 'Bu işlem geri alınamaz.', icon: Trash2, color: 'text-red-600 bg-red-50' };
     }
-    if (modal.type === 'full-restore-confirm') {
-        return { title: 'Sistem Geri Yükleme', subtitle: 'Çakışma raporu ve onay', icon: RefreshCw, color: 'text-orange-600 bg-orange-50' };
-    }
-    if (modal.type === 'import-conflict') {
-        return { title: 'Proje Çakışması', subtitle: 'Bu ID\'ye sahip bir proje zaten var.', icon: AlertTriangle, color: 'text-orange-600 bg-orange-50' };
+    if (modal.type === 'import-analysis') {
+         return { title: 'İçeri Aktarım Analizi', subtitle: 'Veri çakışması ve onay', icon: RefreshCw, color: 'text-orange-600 bg-orange-50' };
     }
     if (modal.type === 'link-selector') {
         const isWiki = modal.linkType === 'wiki';
@@ -910,6 +913,8 @@ const App: React.FC = () => {
     if (modal.type === 'wiki') return { title: 'Wiki Düzenle', subtitle: 'Wiki kaydını güncelle', icon: FileText, color: 'text-indigo-600 bg-indigo-50' };
     if (modal.type === 'citation') return { title: 'Kaynak Düzenle', subtitle: 'Kaynak kaydını güncelle', icon: BookOpen, color: 'text-emerald-600 bg-emerald-50' };
     if (modal.type === 'note') return { title: 'Not Düzenle', subtitle: 'Not detaylarını düzenle', icon: StickyNote, color: 'text-blue-600 bg-blue-50' };
+    if (modal.type === 'alert') return { title: 'Bilgi', subtitle: 'Sistem Mesajı', icon: Info, color: 'text-blue-600 bg-blue-50' };
+    if (modal.type === 'restore-checkpoint-confirm') return { title: 'Yedek Geri Yükle', subtitle: 'Onay gerekli', icon: RefreshCw, color: 'text-orange-600 bg-orange-50' };
     
     return { title: 'Önizleme', subtitle: 'Kayıt detayları', icon: Eye, color: 'text-slate-500 bg-slate-100' };
   };
@@ -917,22 +922,23 @@ const App: React.FC = () => {
   const modalHeader = getModalHeader();
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#c7d5e1] text-[13px] selection:bg-blue-100 font-sans">
+    <div className="flex h-screen w-screen overflow-hidden bg-[#eef2f6] text-[13px] selection:bg-blue-100 font-sans">
       <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} />
-      <input type="file" ref={fullBackupInputRef} className="hidden" accept=".json" onChange={handleFullRestoreRequest} />
       
       {view === 'dashboard' ? (
         <Dashboard 
           projects={state.projects} 
           wikis={state.wikis} 
           citations={state.citations} 
-          notes={state.notes} // Pass Notes
+          notes={state.notes} 
           onOpenProject={openProject} 
           onCreateProject={() => { setModal({ type: 'project' }); setProjectModalTab('general'); setWizardColor('#d8dee3'); }}
           onEditProject={handleEditProjectProperties}
           onDuplicateProject={handleDuplicateProject}
           onDeleteProject={handleDeleteProjectRequest}
           onExportProject={handleExportProject}
+          onGlobalExport={handleGlobalExport}
+          onGlobalImport={handleGlobalImport}
           onImportProject={handleImportClick}
           onOpenDraft={handleOpenDraft}
           onRestore={restoreCheckpoint}
@@ -965,11 +971,10 @@ const App: React.FC = () => {
             onRenameChapter={handleRenameChapter}
           />
 
-          <main className={`flex-1 flex flex-col bg-[#c7d5e1] transition-all border-r border-l border-slate-200/50 ${isPreview ? 'overflow-auto' : 'overflow-hidden'}`}>
-            {/* ... Header and Content ... */}
+          <main className={`flex-1 flex flex-col bg-[#eef2f6] transition-all border-r border-l border-slate-200/50 ${isPreview ? 'overflow-auto' : 'overflow-hidden'}`}>
             {!isPreview && (
-              <header className="h-14 border-b border-slate-300/50 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md shrink-0 z-10 shadow-sm">
-                <div className="flex items-center gap-4">
+              <header className="h-20 border-b border-slate-300/50 flex items-center px-6 bg-white/80 backdrop-blur-md shrink-0 z-10 shadow-sm">
+                <div className="flex items-center gap-4 flex-1">
                   <div className="flex gap-1">
                     <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors border border-slate-200"><ChevronLeft size={14} /></button>
                      <button className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors border border-slate-200"><ChevronRight size={14} /></button>
@@ -992,21 +997,18 @@ const App: React.FC = () => {
                      >
                         <BookOpen size={14} className="text-emerald-500"/> Kaynak Ekle
                      </button>
+                     <button 
+                        onClick={() => { setModal({ type: 'database', dbTab: 'notes', mode: 'create' }); setFilterScope('current'); }}
+                        className="px-3 py-1.5 bg-[#fef9c3] text-slate-800 border border-yellow-200 hover:bg-[#fef08a] rounded-lg flex items-center gap-2 text-xs font-bold transition-all shadow-sm hover:shadow-md"
+                      >
+                          <NotebookPen size={16} className="text-slate-600" /> Not/Görev
+                      </button>
                   </div>
-
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => { setModal({ type: 'database', dbTab: 'notes', mode: 'create' }); setFilterScope('current'); }}
-                    className="px-3 py-1.5 bg-[#fef9c3] text-slate-800 border border-yellow-200 hover:bg-[#fef08a] rounded-lg flex items-center gap-2 text-xs font-bold transition-all shadow-sm hover:shadow-md"
-                  >
-                      <NotebookPen size={16} className="text-slate-600" /> Not/Görev
-                  </button>
                 </div>
               </header>
             )}
 
-            <div className={`flex-1 overflow-y-auto custom-scroll relative ${isPreview ? '' : 'bg-[#c7d5e1]'}`}>
+            <div className={`flex-1 overflow-y-auto custom-scroll relative ${isPreview ? '' : 'bg-[#eef2f6]'}`}>
               <div 
                 className={`${state.currentProject?.orientation === 'landscape' ? 'max-w-5xl' : 'max-w-[850px]'} mx-auto min-h-[1000px] p-12 transition-all shadow-2xl my-10 border border-slate-200`}
                 style={{ backgroundColor: state.currentProject?.pageTheme || '#ffffff' }}
@@ -1072,8 +1074,37 @@ const App: React.FC = () => {
       {modal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           
+          {/* ALERT MODAL */}
+          {modal.type === 'alert' && (
+              <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100 animate-in zoom-in-95 duration-200">
+                  <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Info size={32} />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-2">Bilgi</h3>
+                  <p className="text-sm text-slate-500 mb-6">{modal.alertMessage}</p>
+                  <button onClick={() => setModal(null)} className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition-colors">
+                      Tamam
+                  </button>
+              </div>
+          )}
+
+          {/* RESTORE CHECKPOINT CONFIRM */}
+          {modal.type === 'restore-checkpoint-confirm' && (
+              <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100 animate-in zoom-in-95 duration-200">
+                   <div className="w-16 h-16 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <RefreshCw size={32} />
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 mb-2">Yedek Geri Yüklensin mi?</h3>
+                  <p className="text-sm text-slate-500 mb-6">Mevcut veriler silinecek ve son alınan yerel yedek yüklenecek. Bu işlem geri alınamaz.</p>
+                  <div className="flex gap-3">
+                      <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-lg font-bold text-sm hover:bg-slate-200 transition-colors">Vazgeç</button>
+                      <button onClick={performRestoreCheckpoint} className="flex-1 py-2.5 bg-orange-600 text-white rounded-lg font-bold text-sm hover:bg-orange-700 transition-colors">Yükle</button>
+                  </div>
+              </div>
+          )}
+
           {/* DELETE CONFIRM MODAL */}
-          {modal.type === 'delete-confirm' && modal.data ? (
+          {modal.type === 'delete-confirm' && modal.data && (
               <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-8 text-center border border-slate-100 animate-in zoom-in-95 duration-200">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-6">
                       <Trash2 size={40} strokeWidth={2} />
@@ -1112,10 +1143,11 @@ const App: React.FC = () => {
                       </button>
                   </div>
               </div>
-          ) : modal.type === 'full-restore-confirm' && modal.restoreData ? (
-              // ... (Same restore modal) ...
-              <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-2xl w-full border border-slate-200 flex flex-col">
-                  {/* ... Same content as previous step ... */}
+          )}
+
+          {/* FULL RESTORE CONFIRM */}
+          {modal.type === 'full-restore-confirm' && modal.restoreData && (
+              <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-2xl w-full border border-slate-200 flex flex-col animate-in zoom-in-95">
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-orange-50">
                       <div className="flex items-center gap-4">
                           <div className="p-3 bg-white text-orange-600 rounded-xl shadow-sm border border-orange-100">
@@ -1151,9 +1183,6 @@ const App: React.FC = () => {
                                   <span className="font-bold text-slate-800">{state.notes.length}</span>
                               </div>
                           </div>
-                          <div className="text-center text-xs text-red-500 font-bold bg-red-50 p-2 rounded-lg">
-                              Bu veriler kalıcı olarak silinecek!
-                          </div>
                       </div>
                       <div className="space-y-4">
                           <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest text-center mb-4">YÜKLENECEK YEDEK</h4>
@@ -1175,9 +1204,6 @@ const App: React.FC = () => {
                                   <span className="font-bold text-indigo-900">{modal.restoreData.notes?.length || 0}</span>
                               </div>
                           </div>
-                          <div className="text-center text-xs text-emerald-600 font-bold bg-emerald-50 p-2 rounded-lg">
-                              Bu veriler sisteme eklenecek.
-                          </div>
                       </div>
                   </div>
 
@@ -1186,16 +1212,24 @@ const App: React.FC = () => {
                           İptal Et
                       </button>
                       <button 
-                        onClick={performFullRestore}
+                        onClick={() => {
+                            if (modal.restoreData) {
+                                setState(modal.restoreData);
+                                setModal({ type: 'alert', alertMessage: 'Sistem başarıyla geri yüklendi.' });
+                                setView('dashboard');
+                            }
+                        }}
                         className="px-6 py-3 bg-orange-600 text-white rounded-xl text-xs font-bold hover:bg-orange-700 transition-colors shadow-lg shadow-orange-200 flex items-center gap-2 uppercase tracking-wider"
                       >
                           <RefreshCw size={16} /> Onayla ve Geri Yükle
                       </button>
                   </div>
               </div>
-          ) : modal.type === 'import-conflict' && modal.data && modal.importData ? (
-              // ... (Same conflict modal) ...
-               <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-2xl w-full border border-slate-200 flex flex-col">
+          )}
+
+          {/* IMPORT CONFLICT */}
+          {modal.type === 'import-conflict' && modal.data && modal.importData && (
+               <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-2xl w-full border border-slate-200 flex flex-col animate-in zoom-in-95">
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-orange-50">
                       <div className="flex items-center gap-4">
                           <div className="p-3 bg-white text-orange-500 rounded-xl shadow-sm">
@@ -1215,7 +1249,6 @@ const App: React.FC = () => {
                           <div className="p-5 border-2 border-slate-100 rounded-xl bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all">
                               <h4 className="font-bold text-slate-800 text-lg mb-1">{modal.data.name}</h4>
                               <p className="text-xs text-slate-500 mb-4">{modal.data.author}</p>
-                              
                               <div className="space-y-2">
                                   <div className="flex items-center gap-2 text-xs text-slate-600">
                                       <Calendar size={14} className="text-slate-400" /> 
@@ -1234,7 +1267,6 @@ const App: React.FC = () => {
                           <div className="p-5 border-2 border-indigo-100 rounded-xl bg-indigo-50/30 hover:bg-white hover:border-indigo-300 transition-all">
                               <h4 className="font-bold text-slate-800 text-lg mb-1">{modal.importData.project.name}</h4>
                               <p className="text-xs text-slate-500 mb-4">{modal.importData.project.author}</p>
-                              
                               <div className="space-y-2">
                                   <div className="flex items-center gap-2 text-xs text-slate-600">
                                       <Calendar size={14} className="text-indigo-400" /> 
@@ -1260,9 +1292,11 @@ const App: React.FC = () => {
                       </button>
                   </div>
               </div>
-          ) : modal.type === 'save-draft' ? (
-              // ... (Same draft modal) ...
-              <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full border border-slate-200 text-center">
+          )}
+
+          {/* SAVE DRAFT */}
+          {modal.type === 'save-draft' && (
+              <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full border border-slate-200 text-center animate-in zoom-in-95">
                   <div className="mx-auto w-12 h-12 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-4">
                       <AlertTriangle size={24} />
                   </div>
@@ -1279,168 +1313,276 @@ const App: React.FC = () => {
                       </button>
                   </div>
               </div>
-          ) : modal.type === 'settings' ? (
-              // ... (Same settings modal) ...
-              // For brevity in response, keeping structure
-              <div className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden w-full max-w-3xl h-[600px] flex">
-                  {/* Settings Sidebar */}
-                  <div className="w-64 bg-slate-50 border-r border-slate-200 p-4 flex flex-col">
-                      <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 px-3 mt-2">Ayarlar</h2>
-                      <nav className="space-y-1 flex-1">
-                          <button onClick={() => setSettingsTab('app')} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${settingsTab === 'app' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
-                              <Layout size={14} /> Uygulama
-                          </button>
-                          <button onClick={() => setSettingsTab('backup')} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${settingsTab === 'backup' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
-                              <Database size={14} /> Yedekleme
-                          </button>
-                          <button onClick={() => setSettingsTab('about')} className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${settingsTab === 'about' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>
-                              <Info size={14} /> Hakkında
-                          </button>
-                      </nav>
-                      <button onClick={() => setModal(null)} className="mt-auto w-full py-2 bg-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-300">Kapat</button>
+          )}
+
+          {/* EXPORT OPTIONS */}
+          {modal.type === 'export-options' && (
+              <div className="bg-white rounded-2xl shadow-2xl overflow-hidden w-[320px] border border-blue-200/50 animate-in zoom-in-95">
+                 <div className="flex justify-between items-center px-6 pt-6 pb-2">
+                     <h3 className="text-xl font-bold text-[#4f46e5]">YEDEKLE</h3>
+                     <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                 </div>
+                 
+                 <div className="px-6 py-2 space-y-3">
+                     <label className="flex items-center gap-3 cursor-pointer group">
+                         <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${exportScope.all ? 'bg-[#4f46e5]' : 'bg-slate-200 group-hover:bg-slate-300'}`}>
+                             {exportScope.all && <Check size={14} className="text-white" strokeWidth={3} />}
+                         </div>
+                         <input type="checkbox" className="hidden" checked={exportScope.all} onChange={() => toggleExportScope('all')} />
+                         <span className="font-bold text-slate-800 text-sm">Tümü</span>
+                     </label>
+
+                     <label className="flex items-center gap-3 cursor-pointer group">
+                         <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${exportScope.projects ? 'bg-[#4f46e5]' : 'bg-slate-200 group-hover:bg-slate-300'}`}>
+                             {exportScope.projects && <Check size={14} className="text-white" strokeWidth={3} />}
+                         </div>
+                         <input type="checkbox" className="hidden" checked={exportScope.projects} onChange={() => toggleExportScope('projects')} />
+                         <span className="font-medium text-slate-600 font-mono text-xs">Kitaplar</span>
+                     </label>
+
+                     <label className="flex items-center gap-3 cursor-pointer group">
+                         <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${exportScope.wikis ? 'bg-[#4f46e5]' : 'bg-slate-200 group-hover:bg-slate-300'}`}>
+                             {exportScope.wikis && <Check size={14} className="text-white" strokeWidth={3} />}
+                         </div>
+                         <input type="checkbox" className="hidden" checked={exportScope.wikis} onChange={() => toggleExportScope('wikis')} />
+                         <span className="font-medium text-slate-600 font-mono text-xs">Wiki</span>
+                     </label>
+
+                     <label className="flex items-center gap-3 cursor-pointer group">
+                         <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${exportScope.citations ? 'bg-[#4f46e5]' : 'bg-slate-200 group-hover:bg-slate-300'}`}>
+                             {exportScope.citations && <Check size={14} className="text-white" strokeWidth={3} />}
+                         </div>
+                         <input type="checkbox" className="hidden" checked={exportScope.citations} onChange={() => toggleExportScope('citations')} />
+                         <span className="font-medium text-slate-600 font-mono text-xs">Kaynaklar</span>
+                     </label>
+
+                     <label className="flex items-center gap-3 cursor-pointer group">
+                         <div className={`w-5 h-5 rounded flex items-center justify-center transition-colors ${exportScope.notes ? 'bg-[#4f46e5]' : 'bg-slate-200 group-hover:bg-slate-300'}`}>
+                             {exportScope.notes && <Check size={14} className="text-white" strokeWidth={3} />}
+                         </div>
+                         <input type="checkbox" className="hidden" checked={exportScope.notes} onChange={() => toggleExportScope('notes')} />
+                         <span className="font-medium text-slate-600 font-mono text-xs">Notlar</span>
+                     </label>
+                 </div>
+
+                 <div className="px-6 py-4">
+                     <p className="text-[10px] text-slate-500 font-mono leading-relaxed mb-6">
+                         Bu işlem seçtiğiniz veri alanlarını json formatında yedek alacaktır.
+                     </p>
+                     
+                     <div className="flex justify-end">
+                         <button 
+                            onClick={performExport}
+                            className="px-8 py-2.5 bg-[#4f46e5] text-white rounded-lg font-bold text-sm hover:bg-[#4338ca] transition-colors shadow-lg shadow-indigo-200"
+                         >
+                             Yedekle
+                         </button>
+                     </div>
+                 </div>
+              </div>
+          )}
+
+          {/* IMPORT ANALYSIS */}
+          {modal.type === 'import-analysis' && modal.importData && (
+              <div className="bg-white rounded-xl shadow-2xl overflow-hidden max-w-2xl w-full border border-slate-200 flex flex-col animate-in zoom-in-95">
+                  <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-orange-50">
+                      <div className="flex items-center gap-4">
+                          <div className="p-3 bg-white text-orange-600 rounded-xl shadow-sm border border-orange-100">
+                              <RefreshCw size={24} />
+                          </div>
+                          <div>
+                              <h3 className="text-lg font-bold text-slate-800">İçeri Aktarım Analizi</h3>
+                              <p className="text-xs text-orange-700 font-medium">Veri çakışması ve onay</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setModal(null)} className="p-2 hover:bg-white/50 rounded-lg text-slate-500 transition-colors"><X size={20}/></button>
                   </div>
-                  {/* Settings Content */}
-                  <div className="flex-1 p-8 bg-white overflow-y-auto">
-                      {settingsTab === 'app' && (
-                          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                              <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-2">Uygulama Ayarları</h3>
-                              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl">
-                                  <div>
-                                      <div className="font-bold text-slate-700 text-sm">Tema</div>
-                                      <div className="text-xs text-slate-400">Uygulama görünümünü değiştirin.</div>
-                                  </div>
-                                  <select className="bg-slate-50 border border-slate-200 rounded-lg text-xs p-2 outline-none">
-                                      <option>Aydınlık (Varsayılan)</option>
-                                      <option>Karanlık (Yakında)</option>
-                                  </select>
+                  
+                  <div className="p-8 grid grid-cols-2 gap-8 relative">
+                      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-200 text-slate-500 text-[10px] font-black p-2 rounded-full border-4 border-white z-10">VS</div>
+                      
+                      <div className="space-y-4">
+                          <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest text-center mb-4">MEVCUT DURUM</h4>
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                              <div className="flex justify-between text-sm">
+                                  <span className="text-slate-500 flex items-center gap-2"><Book size={14}/> Projeler</span>
+                                  <span className="font-bold text-slate-800">{state.projects.length}</span>
                               </div>
-                              <div className="flex items-center justify-between p-4 border border-slate-100 rounded-xl">
-                                  <div>
-                                      <div className="font-bold text-slate-700 text-sm">Editor Yazı Boyutu</div>
-                                      <div className="text-xs text-slate-400">Yazma alanındaki varsayılan font boyutu.</div>
-                                  </div>
-                                  <select className="bg-slate-50 border border-slate-200 rounded-lg text-xs p-2 outline-none">
-                                      <option>Küçük (14px)</option>
-                                      <option selected>Orta (16px)</option>
-                                      <option>Büyük (18px)</option>
-                                  </select>
+                              <div className="flex justify-between text-sm">
+                                  <span className="text-slate-500 flex items-center gap-2"><FileText size={14}/> Wikiler</span>
+                                  <span className="font-bold text-slate-800">{state.wikis.length}</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                  <span className="text-slate-500 flex items-center gap-2"><BookOpen size={14}/> Kaynaklar</span>
+                                  <span className="font-bold text-slate-800">{state.citations.length}</span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                  <span className="text-slate-500 flex items-center gap-2"><StickyNote size={14}/> Notlar</span>
+                                  <span className="font-bold text-slate-800">{state.notes.length}</span>
                               </div>
                           </div>
-                      )}
-                      {settingsTab === 'backup' && (
-                          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
-                              {/* Top Banner */}
-                              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-4">
-                                  <div className="p-2 bg-white rounded-full text-emerald-600 shadow-sm border border-emerald-100">
-                                      <ShieldCheck size={24} />
-                                  </div>
-                                  <div>
-                                      <h4 className="font-bold text-emerald-900 text-sm">Verileriniz Güvende!</h4>
-                                      <p className="text-xs text-emerald-700 mt-1">
-                                          3 Katmanlı yedekleme sistemi aktif: LocalStorage, Manuel Dosya Yedekleme ve (Yakında) Bulut Senkronizasyonu.
-                                      </p>
-                                  </div>
-                              </div>
+                      </div>
 
-                              <div className="grid grid-cols-2 gap-6">
-                                  {/* Cloud Backup Card */}
-                                  <div className="border border-slate-200 rounded-xl p-5 hover:shadow-md transition-all relative overflow-hidden group">
-                                      <div className="absolute top-0 right-0 bg-slate-100 text-slate-400 text-[9px] font-black uppercase px-2 py-1 rounded-bl-lg">Yakında</div>
-                                      <div className="flex items-center gap-2 mb-3 text-slate-400 group-hover:text-blue-500 transition-colors">
-                                          <Cloud size={20} />
-                                          <span className="font-bold text-sm">Bulut Yedekleme</span>
-                                      </div>
-                                      <p className="text-xs text-slate-400 mb-6 min-h-[40px]">
-                                          Otomatik olarak her 30 saniyede buluta yedeklenir. (Premium)
-                                      </p>
-                                      <div className="space-y-2 opacity-50 grayscale group-hover:grayscale-0 transition-all cursor-not-allowed">
-                                          <button onClick={() => alert('Bu özellik yakında gelecek!')} className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2">
-                                              <RefreshCw size={14} className="animate-spin-slow" /> Şimdi Senkronize Et
-                                          </button>
-                                          <button onClick={() => alert('Bu özellik yakında gelecek!')} className="w-full py-2 bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-2">
-                                              <Download size={14} /> Buluttan Geri Yükle
-                                          </button>
-                                      </div>
+                      <div className="space-y-4">
+                          <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest text-center mb-4">YÜKLENECEK DOSYA</h4>
+                          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 space-y-3">
+                              {modal.importData._detectedType === 'full-backup' ? (
+                                  <>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-indigo-600 flex items-center gap-2"><Book size={14}/> Projeler</span>
+                                        <span className="font-bold text-indigo-900">{modal.importData.state.projects?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-indigo-600 flex items-center gap-2"><FileText size={14}/> Wikiler</span>
+                                        <span className="font-bold text-indigo-900">{modal.importData.state.wikis?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-indigo-600 flex items-center gap-2"><BookOpen size={14}/> Kaynaklar</span>
+                                        <span className="font-bold text-indigo-900">{modal.importData.state.citations?.length || 0}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-indigo-600 flex items-center gap-2"><StickyNote size={14}/> Notlar</span>
+                                        <span className="font-bold text-indigo-900">{modal.importData.state.notes?.length || 0}</span>
+                                    </div>
+                                  </>
+                              ) : (
+                                  <div className="text-center py-8 text-indigo-600 font-bold text-sm">
+                                      {modal.importData._detectedType === 'single-item' ? 'Tekil Öğe İçe Aktarımı' : 'Proje İçe Aktarımı'}
                                   </div>
-
-                                  {/* Local Backup Card */}
-                                  <div className="border border-slate-200 rounded-xl p-5 hover:shadow-md transition-all bg-white">
-                                      <div className="flex items-center gap-2 mb-3 text-blue-600">
-                                          <HardDrive size={20} />
-                                          <span className="font-bold text-sm">Local Yedekleme</span>
-                                      </div>
-                                      <p className="text-xs text-slate-500 mb-6 min-h-[40px]">
-                                          Kullanıcı verilerinizi cihazınıza JSON dosyası olarak yedekleyin.
-                                      </p>
-                                      <div className="space-y-2">
-                                          <button 
-                                            onClick={handleFullBackup}
-                                            className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-100"
-                                          >
-                                              <RefreshCw size={14} /> Şimdi Kaydet
-                                          </button>
-                                          <button 
-                                            onClick={handleFullRestoreClick}
-                                            className="w-full py-2 bg-emerald-700 text-white rounded-lg text-xs font-bold hover:bg-emerald-800 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-100"
-                                          >
-                                              <Upload size={14} /> Cihazdan Geri Yükle (.json)
-                                          </button>
-                                      </div>
-                                  </div>
-                              </div>
-
-                              {/* Developer Tools */}
-                              <div className="border border-slate-200 rounded-xl p-6 text-center bg-slate-50">
-                                  <div className="flex justify-center text-emerald-600 mb-2">
-                                      <FileCode size={20} />
-                                  </div>
-                                  <h4 className="font-bold text-slate-800 text-sm mb-1">Geliştirici Araçları</h4>
-                                  <p className="text-xs text-slate-500 mb-4">Projenin mimari yapısını ve veri şemasını içeren teknik dökümanı indirin.</p>
-                                  <button className="w-full py-2.5 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition-colors flex items-center justify-center gap-2">
-                                      <Database size={14} /> Proje Bilgisini İndir
-                                  </button>
-                              </div>
-
-                              {/* Security Features List */}
-                              <div className="mt-4 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
-                                  <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 mb-3">
-                                      <ShieldCheck size={16} className="text-blue-600" /> Güvenlik Özellikleri
-                                  </h4>
-                                  <div className="space-y-2">
-                                      <div className="flex items-center gap-2 text-xs text-slate-600">
-                                          <CheckCircle size={14} className="text-emerald-500" /> 
-                                          <span><span className="font-bold">LocalStorage</span> - Anında tarayıcı içi kayıt</span>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-xs text-slate-600">
-                                          <CheckCircle size={14} className="text-emerald-500" /> 
-                                          <span><span className="font-bold">Bulut Sync</span> - Otomatik yedekleme (30 saniye)</span>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-xs text-slate-600">
-                                          <CheckCircle size={14} className="text-emerald-500" /> 
-                                          <span><span className="font-bold">Manuel Backup</span> - JSON dosya desteği</span>
-                                      </div>
-                                  </div>
-                              </div>
+                              )}
                           </div>
-                      )}
-                       {settingsTab === 'about' && (
-                          <div className="space-in-from-right-4 duration-300 text-center pt-10">
-                              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl mx-auto flex items-center justify-center text-white font-black text-xl shadow-xl shadow-blue-200 mb-6">BP</div>
-                              <h3 className="text-xl font-bold text-slate-800">BookWriter Pro</h3>
-                              <p className="text-sm text-slate-500 font-medium mb-8">Modern Kitap Yazma & Proje Yönetim Platformu</p>
-                              <div className="inline-block text-left bg-slate-50 p-6 rounded-xl border border-slate-200 max-w-sm w-full space-y-2">
-                                  <div className="flex justify-between text-xs"><span className="text-slate-500">Versiyon:</span> <span className="font-bold text-slate-800">2.2.0 (Stable)</span></div>
-                                  <div className="flex justify-between text-xs"><span className="text-slate-500">Build:</span> <span className="font-bold text-slate-800">2024.10.25</span></div>
-                                  <div className="flex justify-between text-xs"><span className="text-slate-500">Lisans:</span> <span className="font-bold text-slate-800">MIT / Open Source</span></div>
-                              </div>
-                              <div className="mt-8 text-[10px] text-slate-400">
-                                  Designed with ❤️ for Writers
-                              </div>
-                          </div>
-                      )}
+                      </div>
+                  </div>
+
+                  <div className="px-8 pb-6">
+                      <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-start gap-3">
+                          <AlertTriangle size={18} className="text-orange-600 shrink-0 mt-0.5" />
+                          <p className="text-xs text-orange-800 leading-relaxed">
+                              <strong>Dikkat:</strong> {modal.importData._detectedType === 'full-backup' ? 'Bu işlem mevcut verilerinizi tamamen silip yerine yedek dosyasındaki verileri yükleyecektir.' : 'Bu işlem veritabanına yeni kayıtlar ekleyecektir.'}
+                          </p>
+                      </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-6 border-t border-slate-200 flex justify-end gap-3">
+                      <button onClick={() => setModal(null)} className="px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors uppercase tracking-wider">
+                          İptal Et
+                      </button>
+                      <button 
+                        onClick={performImport}
+                        className="px-6 py-3 bg-orange-600 text-white rounded-xl text-xs font-bold hover:bg-orange-700 transition-colors shadow-lg shadow-orange-200 flex items-center gap-2 uppercase tracking-wider"
+                      >
+                          <RefreshCw size={16} /> Onayla ve Yükle
+                      </button>
                   </div>
               </div>
-          ) : (
+          )}
+
+          {/* SETTINGS */}
+          {modal.type === 'settings' && (
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[600px] border border-slate-200 flex overflow-hidden animate-in zoom-in-95">
+                   {/* Sidebar */}
+                   <div className="w-64 bg-slate-50 border-r border-slate-100 flex flex-col p-6">
+                        <h2 className="text-xl font-bold text-slate-800 mb-6 uppercase tracking-wider">Ayarlar</h2>
+                        <nav className="space-y-1">
+                            <button 
+                                onClick={() => setSettingsTab('app')}
+                                className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold flex items-center gap-3 transition-all ${settingsTab === 'app' ? 'bg-white text-blue-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:bg-slate-100'}`}
+                            >
+                                <Layout size={18} /> Uygulama
+                            </button>
+                            <button 
+                                onClick={() => setSettingsTab('backup')}
+                                className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold flex items-center gap-3 transition-all ${settingsTab === 'backup' ? 'bg-white text-blue-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:bg-slate-100'}`}
+                            >
+                                <Database size={18} /> Yedekleme
+                            </button>
+                            <button 
+                                onClick={() => setSettingsTab('about')}
+                                className={`w-full text-left px-4 py-3 rounded-lg text-sm font-bold flex items-center gap-3 transition-all ${settingsTab === 'about' ? 'bg-white text-blue-600 shadow-sm border border-slate-100' : 'text-slate-500 hover:bg-slate-100'}`}
+                            >
+                                <Info size={18} /> Hakkında
+                            </button>
+                        </nav>
+                        <div className="mt-auto">
+                            <button onClick={() => setModal(null)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 rounded-lg transition-colors">
+                                Kapat
+                            </button>
+                        </div>
+                   </div>
+
+                   {/* Content */}
+                   <div className="flex-1 p-8 overflow-y-auto bg-white relative">
+                       {settingsTab === 'backup' && (
+                           <div className="space-y-8 animate-in fade-in slide-in-from-right-4">
+                                <div className="bg-green-50 border border-green-100 rounded-xl p-6 flex items-start gap-4">
+                                    <div className="p-3 bg-white rounded-full text-green-600 shadow-sm">
+                                        <ShieldCheck size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-800 text-lg">Verileriniz Güvende!</h3>
+                                        <p className="text-slate-600 text-sm mt-1 leading-relaxed">
+                                            3 Katmanlı yedekleme sistemi aktif: LocalStorage, Manuel Dosya Yedekleme ve (Yakında) Bulut Senkronizasyonu.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="border border-slate-200 rounded-xl p-6 relative overflow-hidden group">
+                                        <div className="absolute top-2 right-2 bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-1 rounded">YAKINDA</div>
+                                        <div className="flex items-center gap-3 mb-4 text-slate-400">
+                                            <Cloud size={24} />
+                                            <h4 className="font-bold text-lg">Bulut Yedekleme</h4>
+                                        </div>
+                                        <p className="text-sm text-slate-400 mb-6">Otomatik olarak her 30 saniyede buluta yedeklenir. (Premium)</p>
+                                        <div className="space-y-3 opacity-50 pointer-events-none">
+                                            <button className="w-full py-2 bg-slate-400 text-white rounded-lg font-bold flex items-center justify-center gap-2"><RefreshCw size={16}/> Şimdi Senkronize Et</button>
+                                            <button className="w-full py-2 bg-slate-400 text-white rounded-lg font-bold flex items-center justify-center gap-2"><Download size={16}/> Buluttan Geri Yükle</button>
+                                        </div>
+                                    </div>
+
+                                    <div className="border border-blue-200 bg-blue-50/10 rounded-xl p-6">
+                                        <div className="flex items-center gap-3 mb-4 text-blue-600">
+                                            <HardDrive size={24} />
+                                            <h4 className="font-bold text-lg">Local Yedekleme</h4>
+                                        </div>
+                                        <p className="text-sm text-slate-600 mb-6">Kullanıcı verilerinizi cihazınıza JSON dosyası olarak yedekleyin.</p>
+                                        <div className="space-y-3">
+                                            <button 
+                                                onClick={() => { setModal({type: 'export-options'}); }}
+                                                className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-200"
+                                            >
+                                                <RefreshCw size={16} /> Şimdi Kaydet
+                                            </button>
+                                            <button 
+                                                onClick={handleGlobalImport}
+                                                className="w-full py-2.5 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-green-200"
+                                            >
+                                                <Upload size={16} /> Cihazdan Geri Yükle (.json)
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                           </div>
+                       )}
+                       {settingsTab === 'app' && (
+                           <div className="flex flex-col items-center justify-center h-full text-slate-400 animate-in fade-in">
+                               <Settings size={48} className="mb-4 opacity-20" />
+                               <p className="text-sm font-bold">Uygulama ayarları yakında eklenecek.</p>
+                           </div>
+                       )}
+                       {settingsTab === 'about' && (
+                           <div className="flex flex-col items-center justify-center h-full text-slate-400 animate-in fade-in">
+                               <Info size={48} className="mb-4 opacity-20" />
+                               <h3 className="text-xl font-bold text-slate-800">BookWriter Pro</h3>
+                               <p className="text-sm">Sürüm 2.2.0 (Build 2024)</p>
+                           </div>
+                       )}
+                   </div>
+              </div>
+          )}
+
+          {/* GENERIC FORMS (Project, Database, Wiki, etc) */}
+          {['project', 'wiki', 'citation', 'note', 'wikiPreview', 'citationPreview', 'notePreview', 'database', 'link-selector'].includes(modal.type) && (
           <div className={`bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col transition-all ${
               ['wiki', 'wikiPreview', 'citation', 'citationPreview', 'note', 'database', 'link-selector', 'project'].includes(modal.type) 
               ? 'max-w-5xl w-full h-[85vh]' 
@@ -1449,17 +1591,17 @@ const App: React.FC = () => {
             <div className="px-6 py-6 border-b flex items-center justify-between bg-slate-50">
               
               {/* NEW HEADER DESIGN */}
-              {modalHeader && (
+              {getModalHeader() && (
                   <div className="flex items-center gap-4">
-                      <div className={`p-3 rounded-xl shadow-sm ${modalHeader.color}`}>
-                          <modalHeader.icon size={32} />
+                      <div className={`p-3 rounded-xl shadow-sm ${getModalHeader()!.color}`}>
+                          {React.createElement(getModalHeader()!.icon, { size: 32 })}
                       </div>
                       <div>
                           <h2 className="text-2xl font-bold text-slate-800 tracking-tight leading-none mb-1">
-                              {modalHeader.title}
+                              {getModalHeader()!.title}
                           </h2>
                           <p className="text-xs text-slate-500 font-medium uppercase tracking-wide">
-                              {modalHeader.subtitle}
+                              {getModalHeader()!.subtitle}
                           </p>
                       </div>
                   </div>
@@ -1481,8 +1623,6 @@ const App: React.FC = () => {
             
             <div className="flex-1 overflow-y-auto p-6 custom-scroll bg-white">
                 
-              {/* ... All Forms (Project, Database, Wiki, etc.) from previous output ... */}
-              {/* Keeping content same, just wrapper styles in main return updated above */}
               {/* --- PROJECT WIZARD --- */}
               {modal.type === 'project' && (
                   <form id="project-form" onSubmit={handleSaveProjectModal} className="h-full flex flex-col">
@@ -1529,7 +1669,7 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="flex-1">
-                          {/* GENERAL TAB - Using Hidden Class instead of Conditional Rendering */}
+                          {/* GENERAL TAB */}
                           <div className={`space-y-4 animate-in fade-in slide-in-from-right-4 ${projectModalTab === 'general' ? 'block' : 'hidden'}`}>
                                   <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-2">Genel Bilgiler</h3>
                                   <div>
@@ -1613,7 +1753,6 @@ const App: React.FC = () => {
                       </div>
 
                       <div className="flex justify-between mt-8 pt-4 border-t border-slate-100">
-                          {/* Navigation buttons logic if needed, or simple submit */}
                           <div/>
                           <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex items-center gap-2">
                               <CheckCircle size={16} /> Projeyi {modal.mode === 'edit' ? 'Güncelle' : 'Oluştur'}

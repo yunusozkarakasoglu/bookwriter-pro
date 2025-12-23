@@ -18,6 +18,8 @@ interface DashboardProps {
   onDuplicateProject: (p: Project) => void;
   onDeleteProject: (p: Project) => void;
   onExportProject: (p: Project) => void;
+  onGlobalExport: () => void; // New global export
+  onGlobalImport: () => void; // Added missing prop
   onImportProject: () => void;
   onOpenDraft: () => void;
   onRestore: () => void; 
@@ -35,8 +37,8 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ 
     projects, wikis, citations, notes,
     onOpenProject, onCreateProject, onOpenDraft, onAddWiki, onAddCitation, onAddNote, onOpenSettings,
-    onEditWiki, onEditCitation, onEditNote, onEditProject, onDuplicateProject, onDeleteProject, onExportProject, onImportProject,
-    onExportItem, onDeleteItem
+    onEditWiki, onEditCitation, onEditNote, onEditProject, onDuplicateProject, onDeleteProject, onExportProject, onGlobalExport, onImportProject,
+    onExportItem, onDeleteItem, onGlobalImport
 }) => {
   const [activeTab, setActiveTab] = useState<'projects' | 'citations' | 'wikis' | 'notes'>('projects');
   const [search, setSearch] = useState('');
@@ -328,97 +330,93 @@ const Dashboard: React.FC<DashboardProps> = ({
                         className={`w-full h-12 pl-12 pr-4 border rounded-xl text-sm font-medium outline-none transition-all placeholder:text-slate-400 ${isSearching ? 'bg-white border-indigo-300 ring-4 ring-indigo-50 text-indigo-900' : 'bg-slate-100/50 border-slate-200 focus:bg-white focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50'}`}
                         placeholder="Tüm kütüphanede ara..."
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
+                        onFocus={() => setShowFilterMenu(true)}
+                        onChange={(e) => {
+                            setSearch(e.target.value);
+                            if (e.target.value.length > 0) setShowFilterMenu(false);
+                        }}
                     />
                 </div>
                 
-                <div className="relative">
-                    <button 
-                        onClick={() => setShowFilterMenu(!showFilterMenu)}
-                        className={`h-12 px-4 rounded-xl flex items-center gap-2 font-bold text-xs transition-all border ${showFilterMenu || filterProject !== 'all' ? 'bg-indigo-50 text-indigo-600 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                    >
-                        <Filter size={16} /> Gelişmiş Arama
-                        <ChevronDown size={14} className={`transition-transform ${showFilterMenu ? 'rotate-180' : ''}`} />
-                    </button>
+                {/* Filter Popup Menu - Re-positioned under input */}
+                {showFilterMenu && (
+                    <div className="absolute top-14 left-0 w-full bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-100">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-50 pb-2 flex items-center gap-2">
+                            <Filter size={12}/> GELİŞMİŞ ARAMA & FİLTRE
+                        </h4>
+                        
+                        {/* Project Select */}
+                        <div className="mb-4">
+                            <label className="block text-xs font-bold text-slate-700 mb-1.5">Proje / Kitap</label>
+                            <select 
+                                value={filterProject}
+                                onChange={(e) => setFilterProject(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2.5 outline-none focus:border-indigo-400 focus:bg-white transition-all font-medium text-slate-600"
+                            >
+                                <option value="all">Tüm Projeler</option>
+                                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                        </div>
 
-                    {/* Filter Popup Menu - Redesigned */}
-                    {showFilterMenu && (
-                        <div className="absolute top-14 left-0 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-100">
-                            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 border-b border-slate-50 pb-2">FİLTRELEME SEÇENEKLERİ</h4>
-                            
-                            {/* Project Select */}
-                            <div className="mb-4">
-                                <label className="block text-xs font-bold text-slate-700 mb-1.5">Proje / Kitap</label>
-                                <select 
-                                    value={filterProject}
-                                    onChange={(e) => setFilterProject(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-200 text-xs rounded-lg p-2.5 outline-none focus:border-indigo-400 focus:bg-white transition-all font-medium text-slate-600"
-                                >
-                                    <option value="all">Tüm Projeler</option>
-                                    {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                </select>
-                            </div>
+                        {/* Source Selection Grid */}
+                        <div className="mb-4">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.projects ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchSources.projects && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchSources.projects} onChange={() => setSearchSources(prev => ({ ...prev, projects: !prev.projects }))} />
+                                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Kitaplar</span>
+                                </label>
+                                
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.citations ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchSources.citations && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchSources.citations} onChange={() => setSearchSources(prev => ({ ...prev, citations: !prev.citations }))} />
+                                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Kaynaklar</span>
+                                </label>
 
-                            {/* Source Selection Grid */}
-                            <div className="mb-4">
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.projects ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchSources.projects && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchSources.projects} onChange={() => setSearchSources(prev => ({ ...prev, projects: !prev.projects }))} />
-                                        <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Kitaplar</span>
-                                    </label>
-                                    
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.citations ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchSources.citations && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchSources.citations} onChange={() => setSearchSources(prev => ({ ...prev, citations: !prev.citations }))} />
-                                        <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Kaynaklar</span>
-                                    </label>
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.wikis ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchSources.wikis && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchSources.wikis} onChange={() => setSearchSources(prev => ({ ...prev, wikis: !prev.wikis }))} />
+                                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Wiki</span>
+                                </label>
 
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.wikis ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchSources.wikis && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchSources.wikis} onChange={() => setSearchSources(prev => ({ ...prev, wikis: !prev.wikis }))} />
-                                        <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Wiki</span>
-                                    </label>
-
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.notes ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchSources.notes && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchSources.notes} onChange={() => setSearchSources(prev => ({ ...prev, notes: !prev.notes }))} />
-                                        <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Notlar</span>
-                                    </label>
-                                </div>
-                            </div>
-
-                            {/* Scope Selection */}
-                            <div className="mb-2">
-                                <label className="block text-xs font-bold text-slate-700 mb-2">Arama Kapsamı</label>
-                                <div className="space-y-2">
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchScope.title ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchScope.title && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchScope.title} onChange={() => setSearchScope(prev => ({ ...prev, title: !prev.title }))} />
-                                        <span className="text-xs text-slate-600 group-hover:text-slate-900">Başlıklar</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer group select-none">
-                                        <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchScope.content ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                                            {searchScope.content && <Check size={10} className="text-white" />}
-                                        </div>
-                                        <input type="checkbox" className="hidden" checked={searchScope.content} onChange={() => setSearchScope(prev => ({ ...prev, content: !prev.content }))} />
-                                        <span className="text-xs text-slate-600 group-hover:text-slate-900">İçerikler</span>
-                                    </label>
-                                </div>
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchSources.notes ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchSources.notes && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchSources.notes} onChange={() => setSearchSources(prev => ({ ...prev, notes: !prev.notes }))} />
+                                    <span className="text-xs font-medium text-slate-600 group-hover:text-slate-900 font-mono">Notlar</span>
+                                </label>
                             </div>
                         </div>
-                    )}
-                </div>
+
+                        {/* Scope Selection */}
+                        <div className="mb-2">
+                            <label className="block text-xs font-bold text-slate-700 mb-2">Arama Kapsamı</label>
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchScope.title ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchScope.title && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchScope.title} onChange={() => setSearchScope(prev => ({ ...prev, title: !prev.title }))} />
+                                    <span className="text-xs text-slate-600 group-hover:text-slate-900">Başlıklar</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer group select-none">
+                                    <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm ${searchScope.content ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                                        {searchScope.content && <Check size={10} className="text-white" />}
+                                    </div>
+                                    <input type="checkbox" className="hidden" checked={searchScope.content} onChange={() => setSearchScope(prev => ({ ...prev, content: !prev.content }))} />
+                                    <span className="text-xs text-slate-600 group-hover:text-slate-900">İçerikler</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Clear Filter Button */}
                 {isFilterActive && (
@@ -433,15 +431,23 @@ const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             {/* Actions */}
-            <div className="flex items-center gap-3 ml-6">
+            <div className="flex items-center gap-2 ml-6">
                 
-                {/* Enabled Import for All Tabs */}
+                {/* Global Export/Import Actions */}
                 <button 
-                    onClick={onImportProject}
-                    className="h-12 w-12 bg-white text-indigo-600 border border-indigo-200 rounded-xl flex items-center justify-center hover:bg-indigo-50 hover:shadow-md transition-all"
-                    title="İçe Aktar (Upload)"
+                    onClick={onGlobalExport}
+                    className="h-10 px-3 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 flex items-center gap-2 transition-all font-bold text-xs"
+                    title="Yedekle (Dışarı Aktar)"
                 >
-                    <Upload size={20} />
+                    <Download size={16} /> <span className="hidden md:inline">Yedekle</span>
+                </button>
+
+                <button 
+                    onClick={onGlobalImport}
+                    className="h-10 px-3 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 flex items-center gap-2 transition-all font-bold text-xs"
+                    title="İçe Aktar (Yükle)"
+                >
+                    <Upload size={16} /> <span className="hidden md:inline">Yükle</span>
                 </button>
                 
                 <div className="h-8 w-px bg-slate-200 mx-2"></div>
